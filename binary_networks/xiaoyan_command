@@ -1,0 +1,1 @@
+./benchmark -N 1000 -k 15 -maxk 50 -mu 0.1
