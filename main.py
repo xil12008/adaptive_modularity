@@ -34,7 +34,7 @@ import operator
 ###################Configurations######################
 lossfunction_const = 0
 regularization_const = (0.1, 1)
-inputdata = "LFR"
+inputdata = "Football"
 solver = "BFGS"
 totalfeatures = 2
 
@@ -391,12 +391,12 @@ class BaseInputGraph:
         for cc in range(len(vc)):
           txt.write(" ".join([str(_) for _ in vc[cc]]) + "\n")
 
-  def results(self, algo, hasgnc = False):
+  def results(self, algo, hasgnc = False, filename="_"):
     title = self.__class__.__name__
     AMI_increase = []
     ARI_increase = []
     rounds = 1
-    if hasgnc: rounds = 20
+    if hasgnc: rounds = 10
     print "Runing ", algo.__name__, "for", rounds, "rounds"
     for i in range(rounds):
       vd = algo(self.g, weights = [ (lambda w: max(w,0) )(w) for w in self.g.es["weight"]] )
@@ -404,7 +404,7 @@ class BaseInputGraph:
         vc = vd.as_clustering()
       except:
         vc = vd #in case a VertexCluster instance is returned
-      self.write_vertex_clustering(vc, "_weighted")
+      self.write_vertex_clustering(vc, "_weighted%s" % filename)
       if hasgnc:
         for cc in range(len(vc)):
           for cci in vc[cc]:
@@ -414,7 +414,7 @@ class BaseInputGraph:
         vc = vd.as_clustering()
       except:
         vc = vd #in case a VertexCluster instance is returned
-      self.write_vertex_clustering(vc, "_unweighted")
+      self.write_vertex_clustering(vc, "_unweighted%s" % filename)
       if hasgnc:
         for cc in range(len(vc)):
           for cci in vc[cc]:
@@ -437,11 +437,15 @@ class BaseInputGraph:
 
         AMI_increase.append(ami_weight - ami_unweight)
         ARI_increase.append(ari_weight - ari_unweight)
-    print "Adjusted Mutual Information increases by",
-    print 1.0 * sum(AMI_increase) / len(AMI_increase)
-    print "Adjusted Rand index increases by",
-    print 1.0 * sum(ARI_increase) / len(ARI_increase)
-    print "-" * 20
+    if hasgnc:
+      print "Adjusted Mutual Information increases by",
+      print 1.0 * sum(AMI_increase) / len(AMI_increase)
+      print "Adjusted Rand index increases by",
+      print 1.0 * sum(ARI_increase) / len(ARI_increase)
+      print "-" * 20
+      return AMI_increase
+      #return ARI_increase
+
   def get_C(self, group):
     '''
     @param group: a list of nodes as ONE ground truth communities
@@ -524,12 +528,12 @@ class BaseInputGraph:
           prevd = d
         except:
           break
-    #bestseeds = dict(sorted(diameterchange.iteritems(), key=operator.itemgetter(1), reverse=True)[:20])
-    bestseeds = [ random.choice(diameterchange.keys()) for _ in range(20)]
-    print "seeds", bestseeds
+    bestseeds = dict(sorted(diameterchange.iteritems(), key=operator.itemgetter(1), reverse=True)[:20])
+    #bestseeds = [ random.choice(diameterchange.keys()) for _ in range(20)]
+    print "bestseeds", bestseeds
     C = []
-    #for seed in bestseeds.keys():
-    for seed in bestseeds:
+    for seed in bestseeds.keys():
+    #for seed in bestseeds:
       cc1 = hood[seed][-1]
       hood[seed].remove(cc1)
       C.append( (hood[seed], [cc1] ) )
@@ -566,20 +570,24 @@ class Ring ( BaseInputGraph ):
     self.g.add_edges(edges)
     self.g.es["weight"] = ws
     self.g.vs["comm"] = [str( int(_ / clique_size) ) for _ in range(len(self.g.vs))]
+    print "#nodes=", maxid + 1
+    print "#edges=", len(self.g.es)
 
   def run(self):
     '''
     run the algorithm
-    '''    
-  #  c1 = range(0, 10)
-  #  c2 = range(10, 20)
-    c1 = range(0, 5)
-    c2 = range(5, 10)
-    C = [(c1, c2)]
+    '''
+    #supervised
+    group = [0,1,2,3,4]
+    C = BaseInputGraph.get_C(self, group)
+    #unsupervised
+    #C = BaseInputGraph.unsupervised_logexpand(self)
+    print C
     BaseInputGraph.run(self, C)
-    BaseInputGraph.results(self, Graph.community_fastgreedy, hasgnc = True)
-    BaseInputGraph.results(self, Graph.community_label_propagation, hasgnc = True)
-    BaseInputGraph.results(self, Graph.community_leading_eigenvector, hasgnc = True)
+    for e in self.g.es:
+      print "(",e.tuple[0]," ,",
+      print e.tuple[1],")=",
+      print e["weight"]
     #do not know why, but the fast greedy algorithm implemented in iGraph sometimes has some problems.
     #The original implementation in c++ released by Dr.Newman on his website always works well.
 
@@ -606,22 +614,36 @@ class Football ( BaseInputGraph ):
       conf = (fconf.read()).split()
     self.g.vs["comm"] = [x for x in conf]
     self.g.vs["myID"] = [ str(int(i)) for i in range(maxid+1)]
+    print "#nodes=", maxid + 1
+    print "#edges=", len(self.g.es)
 
   def run(self):
-    group = [i for i, conf in enumerate(self.g.vs["comm"]) if conf == '4']
-    #print group
-    C = BaseInputGraph.get_C(self, group)
-    C = BaseInputGraph.unsupervised_logexpand(self)
-    BaseInputGraph.run(self, C)
-    BaseInputGraph.results(self, Graph.community_fastgreedy, hasgnc = True)
-    BaseInputGraph.results(self, Graph.community_label_propagation, hasgnc = True)
-    BaseInputGraph.results(self, Graph.community_leading_eigenvector, hasgnc = True)
-    
+    AMI_increase = [[], [], [], [], [], []]
+    for igroup in range(10):
+      #semi-supervised
+      #group = [i for i, conf in enumerate(self.g.vs["comm"]) if conf == str(igroup)]
+      #if len(group) < 3: continue
+      #C = BaseInputGraph.get_C(self, group)
+
+      #unsupervised
+      C = BaseInputGraph.unsupervised_logexpand(self)
+
+      BaseInputGraph.run(self, C)
+      AMI_increase[0] += BaseInputGraph.results(self, Graph.community_fastgreedy, hasgnc = True)
+      AMI_increase[1] += BaseInputGraph.results(self, Graph.community_label_propagation, hasgnc = True)
+      AMI_increase[2] += BaseInputGraph.results(self, Graph.community_leading_eigenvector, hasgnc = True)
+      AMI_increase[3] += BaseInputGraph.results(self, Graph.community_walktrap, hasgnc = True)
+      AMI_increase[4] += BaseInputGraph.results(self, Graph.community_edge_betweenness, hasgnc = True)
+      AMI_increase[5] += BaseInputGraph.results(self, Graph.community_multilevel, hasgnc = True)
+    for i in range(6):
+      print "& %.5f" % ( 1.0 * sum(AMI_increase[i]) / len(AMI_increase[i]) )
+
 class LFR ( BaseInputGraph ):
-  def __init__(self):
+  def __init__(self, trialval=1):
     ws = []
     edges = []
-    with open("./binary_networks/network_1000_mu3.dat", "r") as txt:
+    self.trial = trialval
+    with open("./binary_networks/mu0.5/network%d.dat" % self.trial, "r") as txt:
       for line in txt:
         seg = line.split()
         edges.append((int(seg[0]), int(seg[1])))
@@ -631,7 +653,7 @@ class LFR ( BaseInputGraph ):
     self.g = Graph()
     print maxid
     self.g.add_vertices(maxid + 1)
-    with open("./binary_networks/community_1000_mu3.dat", "r") as txt:
+    with open("./binary_networks/mu0.5/community%d.dat" % self.trial, "r") as txt:
       for line in txt:
         seg = line.split()
         #print seg[0]
@@ -641,19 +663,22 @@ class LFR ( BaseInputGraph ):
     self.g.simplify()
     self.g.delete_vertices(0)
     self.g.es["weight"] = ws
-    #BaseInputGraph.write_ground_truth(self, "./LFRresults/ground_truth_community.groups")
+    BaseInputGraph.write_ground_truth(self, "./ground_truth_community%d.groups" % self.trial)
+    print "#nodes=", maxid + 1
+    print "#edges=", len(self.g.es) 
 
   def run(self):
-    #C = []
-    #for i in range(6):
-    #  commval = str(random.randint(0,100))
-    #  group = [i for i, comm in enumerate(self.g.vs["comm"]) if comm == commval]
-    #  C += BaseInputGraph.get_C(self, group)
+    #supervised
+    C = []
+    for i in range(6):
+      commval = str(random.randint(0,100))
+      group = [i for i, comm in enumerate(self.g.vs["comm"]) if comm == commval]
+      C += BaseInputGraph.get_C(self, group)
+    #unsupervised
     C = BaseInputGraph.unsupervised_logexpand(self)
     BaseInputGraph.run(self, C, p0=np.array([1 , 1]))
-    BaseInputGraph.results(self, Graph.community_fastgreedy, hasgnc = True)
-    BaseInputGraph.results(self, Graph.community_label_propagation, hasgnc = True)
-    BaseInputGraph.results(self, Graph.community_leading_eigenvector, hasgnc = True)
+    BaseInputGraph.results(self, Graph.community_fastgreedy, hasgnc = False,\
+     filename="%d" %self.trial)
 
 class Physic (BaseInputGraph):
   def __init__(self):
@@ -682,7 +707,48 @@ class Physic (BaseInputGraph):
   def run(self):
     C = BaseInputGraph.unsupervised_logexpand(self)
     BaseInputGraph.run(self, C, p0=np.array([0.04, 0.04]))
-    BaseInputGraph.results(self, Graph.community_fastgreedy)
+    with open("./physic/Physic_weights.pairs", "w+") as txt:
+      for e in self.g.es:
+        txt.write("%d %d %f\n" %(e.tuple[0], e.tuple[1], e["weight"]) )
+    #BaseInputGraph.results(self, Graph.community_fastgreedy)
+
+class Enron (BaseInputGraph):
+  def __init__(self):
+    '''
+    @return: Enron email communication network as iGraph graph instance 
+    '''
+    edges = []
+    weights = []
+    f = open("./enron/email-Enron.txt", "r")
+    for line in f:
+      if line and line[0]!='#':
+        seg = line.split()
+        edges.append( (int(seg[0]), int(seg[1])) )
+        weights.append( 1 )
+    maxid = max( edges, key=itemgetter(1) )[1]
+    maxid = max( maxid, max(edges,key=itemgetter(0))[0] )
+    self.g = Graph()
+    self.g.add_vertices(maxid + 1)
+    self.g.add_edges(edges)
+    self.g.to_undirected()
+    self.g.simplify()
+    self.g.vs["myID"] = [ str(int(i)) for i in range(maxid+1)]
+    print "#nodes=", maxid + 1
+    print "#edges=", len(self.g.es)
+
+  def run(self):
+    C = BaseInputGraph.unsupervised_logexpand(self)
+    BaseInputGraph.run(self, C, p0=np.array([0.04, 0.04]))
+    with open("./enron/email-Enron_weights.pairs", "w+") as txt:
+      for e in self.g.es:
+        txt.write("%d %d %f\n" %(e.tuple[0], e.tuple[1], e["weight"]) )
+    with open("./enron/email-Enron_unweights.pairs", "w+") as txt:
+      count = 0
+      for e in self.g.es:
+        txt.write("%d %d\n" %(e.tuple[0], e.tuple[1]) )
+        count += 1
+      print count , "edges written."
+    #BaseInputGraph.results(self, Graph.community_fastgreedy)
 
 if __name__ == "__main__":
   if inputdata == "Ring":
@@ -690,8 +756,11 @@ if __name__ == "__main__":
   elif inputdata == "Football":
     Football().run()
   elif inputdata == "LFR":
-    LFR().run()
+    for i in range(1,11):
+      LFR(i).run()
   elif inputdata == "Amazon":
     Amazon().run()
   elif inputdata == "Physic":
     Physic().run()
+  elif inputdata == "Enron":
+    Enron().run()
